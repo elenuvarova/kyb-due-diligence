@@ -9,15 +9,17 @@ let dbKind;
 
 if (isPostgres) {
   dbKind = "postgres";
+  // Enable SSL only when the connection string requests it (e.g. Neon, Render).
+  // Local/Coolify Postgres containers don't support SSL, so don't force it.
+  const requireSsl = url.includes("sslmode=require") || url.includes("ssl=true");
   sequelize = new Sequelize(url, {
     dialect: "postgres",
     logging: false,
-    dialectOptions: {
-      ssl: {
-        require: true,
-        rejectUnauthorized: false,
+    ...(requireSsl && {
+      dialectOptions: {
+        ssl: { require: true, rejectUnauthorized: false },
       },
-    },
+    }),
   });
 } else {
   dbKind = "sqlite";
