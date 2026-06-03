@@ -237,41 +237,68 @@ export async function buildDossier(dossierId) {
       result: { rootEntity: rootSummary(canonical), ownership, adverse: EMPTY_ADVERSE, litigation: EMPTY_LITIGATION, distress: EMPTY_DISTRESS, sources: ownershipSources },
     });
 
-    // ---- Slower external scans: adverse media + litigation + SEC distress + PEP, parallel ----
+    // ---- Slower external scans ----
+    // All four sources start concurrently, but GDELT (adverse media) is by far the slowest
+    // (heavy throttling). So we publish in two stages: the fast sources (litigation, SEC,
+    // PEP) land first and their panels render immediately; adverse fills in when GDELT
+    // returns. This keeps the UI from looking hung behind one slow source.
     const adverseMod = await optional("../adverse/index.js");
     const wikidata = await optional("../sources/wikidata.js");
-    const [adverse, litigation, distressRaw, pepByName] = await Promise.all([
-      adverseMod?.scanAdverse
-        ? adverseMod.scanAdverse(canonical.name).catch((e) => { console.warn("[dossier] adverse failed:", e.message); issues.push("gdelt"); return EMPTY_ADVERSE; })
-        : (issues.push("gdelt"), Promise.resolve(EMPTY_ADVERSE)),
-      cl?.isConfigured?.()
-        ? cl.searchLitigation(canonical.name).catch((e) => { console.warn("[dossier] litigation failed:", e.message); issues.push("courtlistener"); return EMPTY_LITIGATION; })
-        : Promise.resolve(EMPTY_LITIGATION),
-      sec && canonical.cik
-        ? sec.getDistressSignals(canonical.cik).catch((e) => { console.warn("[dossier] sec distress failed:", e.message); issues.push("sec-distress"); return { flags: [], filings: [] }; })
-        : Promise.resolve({ flags: [], filings: [] }),
-      wikidata?.enrichPSC && psc.length
-        ? wikidata.enrichPSC(psc).catch((e) => { console.warn("[dossier] wikidata PEP failed:", e.message); issues.push("wikidata"); return {}; })
-        : Promise.resolve({}),
-    ]);
-    const distress = { ...distressRaw, cik: canonical.cik || null };
 
-    // Rebuild the graph with PEP flags now known, and persist it once (idempotent).
-    const ownershipFinal = buildOwnershipGraph({ canonical, gleifOwnership, psc, pepByName });
-    try {
-      await persistGraph(rootEntity, gleifOwnership, psc, pepByName);
-    } catch (e) {
-      console.warn("[dossier] persistGraph failed:", e.message);
-      issues.push("persist-graph");
-    }
+    const adverseP = adverseMod?.scanAdverse
+      ? adverseMod.scanAdverse(canonical.name).catch((e) => { console.warn("[dossier] adverse failed:", e.message); issues.push("gdelt"); return EMPTY_ADVERSE; })
+      : (issues.push("gdelt"), Promise.resolve(EMPTY_ADVERSE));
+    const litigationP = cl?.isConfigured?.()
+      ? cl.searchLitigation(canonical.name).catch((e) => { console.warn("[dossier] litigation failed:", e.message); issues.push("courtlistener"); return EMPTY_LITIGATION; })
+      : Promise.resolve(EMPTY_LITIGATION);
+    const distressP = sec && canonical.cik
+      ? sec.getDistressSignals(canonical.cik).catch((e) => { console.warn("[dossier] sec distress failed:", e.message); issues.push("sec-distress"); return { flags: [], filings: [] }; })
+      : Promise.resolve({ flags: [], filings: [] });
+    const pepP = wikidata?.enrichPSC && psc.length
+      ? wikidata.enrichPSC(psc).catch((e) => { console.warn("[dossier] wikidata PEP failed:", e.message); issues.push("wikidata"); return {}; })
+      : Promise.resolve({});
 
-    // A source that returned a typed "unavailable" (vs. a genuine empty result) must mark
-    // the dossier partial — an empty list is not a clean bill of health if the call failed.
+    // Mutable result snapshot, seeded with the already-published ownership. Each stage
+    // mutates it and re-persists the whole snapshot (DB writes stay sequential).
+    const result = { rootEntity: rootSummary(canonical), ownership, adverse: EMPTY_ADVERSE, litigation: EMPTY_LITIGATION, distress: EMPTY_DISTRESS, sources: ownershipSources };
+    const sourcesSet = new Set(ownershipSources);
+
+    // ---- Stage 1: fast sources (litigation + SEC distress + PEP) ----
+    const [litigation, distressRaw, pepByName] = await Promise.all([litigationP, distressP, pepP]);
     if (litigation.error) issues.push("courtlistener");
     if (distressRaw.unavailable) issues.push("sec-distress");
+    if (litigation.cases?.length) sourcesSet.add("courtlistener");
+    if (canonical.cik) sourcesSet.add("sec");
+    if (Object.keys(pepByName).length) sourcesSet.add("wikidata");
 
-    // Idempotent + isolated: replace this entity's prior articles/cases. A persistence
-    // failure degrades to "partial" rather than discarding the already-published graph.
+    result.litigation = litigation;
+    result.distress = { ...distressRaw, cik: canonical.cik || null };
+    result.ownership = buildOwnershipGraph({ canonical, gleifOwnership, psc, pepByName });
+    result.sources = [...sourcesSet];
+
+    try {
+      await persistGraph(rootEntity, gleifOwnership, psc, pepByName);
+    } catch (e) { console.warn("[dossier] persistGraph failed:", e.message); issues.push("persist-graph"); }
+    try {
+      await Litigation.destroy({ where: { entityId: rootEntity.id } });
+      for (const c of litigation.cases || []) {
+        await Litigation.create({
+          entityId: rootEntity.id, caseName: c.caseName, court: c.court,
+          dateFiled: c.dateFiled, docketNumber: c.docketNumber, suitNature: c.suitNature,
+          chapter: c.chapter, isBankruptcy: c.isBankruptcy, url: c.url,
+        });
+      }
+    } catch (e) { console.warn("[dossier] persist litigation failed:", e.message); issues.push("persist"); }
+
+    // Publish stage 1 — status stays "building" while adverse is still in flight.
+    await dossier.update({ result });
+
+    // ---- Stage 2: adverse media (GDELT, the slow one) ----
+    const adverse = await adverseP;
+    if (adverse.articles?.length) sourcesSet.add("gdelt");
+    result.adverse = adverse;
+    result.sources = [...sourcesSet];
+
     try {
       await AdverseArticle.destroy({ where: { entityId: rootEntity.id } });
       for (const a of adverse.articles || []) {
@@ -284,33 +311,14 @@ export async function buildDossier(dossierId) {
           relevanceScore: a.relevanceScore, snippet: a.snippet,
         });
       }
-      await Litigation.destroy({ where: { entityId: rootEntity.id } });
-      for (const c of litigation.cases || []) {
-        await Litigation.create({
-          entityId: rootEntity.id, caseName: c.caseName, court: c.court,
-          dateFiled: c.dateFiled, docketNumber: c.docketNumber, suitNature: c.suitNature,
-          chapter: c.chapter, isBankruptcy: c.isBankruptcy, url: c.url,
-        });
-      }
-    } catch (e) {
-      console.warn("[dossier] persist adverse/litigation failed:", e.message);
-      issues.push("persist");
-    }
-
-    const sources = Array.from(new Set([
-      ...ownershipSources,
-      ...((adverse.articles || []).length ? ["gdelt"] : []),
-      ...((litigation.cases || []).length ? ["courtlistener"] : []),
-      ...(canonical.cik ? ["sec"] : []),
-      ...(Object.keys(pepByName).length ? ["wikidata"] : []),
-    ]));
+    } catch (e) { console.warn("[dossier] persist adverse failed:", e.message); issues.push("persist"); }
 
     await dossier.update({
       status: issues.length ? "partial" : "ready",
       falseFlagEstimate: adverse.falseFlagEstimate || 0,
-      result: { rootEntity: rootSummary(canonical), ownership: ownershipFinal, adverse, litigation, distress, sources },
+      result,
       completedAt: new Date(),
-      error: issues.length ? `Some sources unavailable: ${issues.join(", ")}` : null,
+      error: issues.length ? `Some sources unavailable: ${[...new Set(issues)].join(", ")}` : null,
     });
   } catch (err) {
     console.error("[dossier] build failed:", err);

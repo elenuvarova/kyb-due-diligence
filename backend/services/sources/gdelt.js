@@ -25,7 +25,7 @@ function isTransient(err) {
 async function gdeltFetch(url) {
   const attempt = async () => {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 25000); // GDELT can be slow to first byte
+    const timer = setTimeout(() => ctrl.abort(), 15000); // fail faster so a slow GDELT doesn't stall the build
     try {
       const res = await fetch(url, { signal: ctrl.signal });
       const text = await res.text();
@@ -58,9 +58,10 @@ async function gdeltFetch(url) {
         lastCallAt = Date.now();
         return await attempt();
       } catch (err) {
-        if (!isTransient(err) || i >= 2) throw err;
-        // Throttling needs more than the minimum gap to clear; back off harder for it.
-        await sleep(err.throttled ? MIN_SPACING_MS * 2 : MIN_SPACING_MS);
+        // One retry only: GDELT throttles persistently, so further retries just stall the
+        // build for little gain — degrade to empty/partial faster instead.
+        if (!isTransient(err) || i >= 1) throw err;
+        await sleep(MIN_SPACING_MS);
       }
     }
   };

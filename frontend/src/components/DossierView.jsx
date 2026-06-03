@@ -207,11 +207,11 @@ export default function DossierView({ dossierId, onBack }) {
           </section>
         )}
 
-        {/* While building, say the extra sources are still being checked so their
-            current absence isn't read as a clean "nothing found". */}
-        {isBuilding && !hasLitigation(dossier) && !hasDistress(dossier) && (
+        {/* While building, say work is still in flight so an empty panel isn't read as a
+            clean "nothing found". (Sources publish progressively; adverse media is last.) */}
+        {isBuilding && (
           <p className="muted small notice panel-full" role="status">
-            Still checking litigation and financial-distress sources…
+            Some sources are still being checked…
           </p>
         )}
       </div>
