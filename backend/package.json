@@ -1,0 +1,22 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "dev": "node --watch --env-file-if-exists=.env server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "fastest-levenshtein": "^1.0.16",
+    "p-limit": "^7.3.0",
+    "pg": "^8.11.3",
+    "pg-hstore": "^2.3.4",
+    "sentiment": "^5.0.2",
+    "sequelize": "^6.35.2"
+  },
+  "optionalDependencies": {
+    "sqlite3": "^5.1.6"
+  }
+}
