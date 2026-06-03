@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import ReactFlow, { Background, Controls, MarkerType } from "reactflow";
-import { computeLayout, LAYOUT } from "../graphLayout.js";
+import { computeLayout, graphSignature, LAYOUT } from "../graphLayout.js";
 
 // Ownership graph panel. Renders ownership.nodes / ownership.edges with a
 // simple top-down layered layout computed from depth (BFS from the root).
@@ -14,8 +14,9 @@ export default function OwnershipGraph({ ownership }) {
   // Each poll returns a fresh JSON parse, so `nodes`/`edges` get new array identities even
   // when the graph is unchanged. Memoize on a content signature instead of array identity
   // so we don't rebuild reactflow (and snap dragged nodes back) every ~1.5s while building.
-  const sig =
-    nodes.map((n) => n.id).join(",") + "|" + edges.map((e) => `${e.from}>${e.to}`).join(",");
+  // The signature includes PEP state so the badge refreshes when the PEP-annotated graph
+  // arrives on a later poll over the same node set.
+  const sig = graphSignature(nodes, edges);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const { rfNodes, rfEdges } = useMemo(() => buildGraph(nodes, edges), [sig]);
 
@@ -57,6 +58,9 @@ export default function OwnershipGraph({ ownership }) {
         <li>
           <span className="legend-swatch legend-exception" /> Undisclosed
         </li>
+        <li>
+          <span className="legend-swatch legend-pep" /> Possible PEP
+        </li>
       </ul>
     </div>
   );
@@ -65,8 +69,10 @@ export default function OwnershipGraph({ ownership }) {
 function graphSummary(nodes, edges) {
   const people = nodes.filter((n) => n.type === "person").length;
   const exceptions = nodes.filter((n) => n.type === "exception").length;
+  const peps = nodes.filter((n) => n.isPep).length;
   const parts = [`Ownership graph: ${nodes.length} nodes, ${edges.length} relationships`];
   if (people) parts.push(`${people} beneficial owners`);
+  if (peps) parts.push(`${peps} possible PEP`);
   if (exceptions) parts.push(`${exceptions} undisclosed`);
   return parts.join(", ");
 }
@@ -110,6 +116,7 @@ function buildGraph(nodes, edges) {
 function nodeClass(n) {
   const classes = ["graph-node", `graph-node-${n.type || "entity"}`];
   if (n.isRoot) classes.push("graph-node-root");
+  if (n.isPep) classes.push("graph-node-pep");
   return classes.join(" ");
 }
 
@@ -129,6 +136,18 @@ function NodeLabel({ node }) {
       {node.sublabel && <div className="node-sublabel">{node.sublabel}</div>}
       {node.type === "exception" && (
         <div className="node-tag">Undisclosed ownership</div>
+      )}
+      {node.isPep && (
+        <div
+          className="node-tag node-tag-pep"
+          title={
+            node.pepPositions?.length
+              ? `Possible politically-exposed person — ${node.pepPositions.join(", ")} (name match, verify)`
+              : "Possible politically-exposed person — name match, verify"
+          }
+        >
+          ⚑ Possible PEP
+        </div>
       )}
     </div>
   );

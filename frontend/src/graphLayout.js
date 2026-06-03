@@ -3,6 +3,18 @@
 
 export const LAYOUT = { NODE_W: 200, X_GAP: 60, Y_GAP: 120 };
 
+// Signature of the render-affecting graph state. OwnershipGraph memoizes on this so it
+// doesn't rebuild reactflow on every ~1.5s poll — but it MUST change when PEP flags flip,
+// because the dossier publishes the graph twice (without then with PEP) over an identical
+// node-id/edge set. Keying on ids alone left the PEP badge stale on the live poll.
+export function graphSignature(nodes, edges) {
+  return (
+    nodes.map((n) => `${n.id}:${n.isPep ? 1 : 0}`).join(",") +
+    "|" +
+    edges.map((e) => `${e.from}>${e.to}`).join(",")
+  );
+}
+
 export function computeLayout(nodes, edges) {
   const { NODE_W, X_GAP, Y_GAP } = LAYOUT;
   const ids = new Set(nodes.map((n) => n.id));

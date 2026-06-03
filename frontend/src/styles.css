@@ -485,6 +485,11 @@ h1 {
   border-color: var(--warn);
 }
 
+.legend-pep {
+  background: #3a1320;
+  border-color: #b3344f;
+}
+
 /* reactflow node styling via our classNames */
 .graph-node {
   background: #20202a;
@@ -543,6 +548,16 @@ h1 {
 
 .graph-node-root .node-label {
   color: #d6c8ff;
+}
+
+/* PEP is a modifier on a person node: red ring + a tag. */
+.graph-node-pep {
+  border-color: #b3344f;
+  box-shadow: 0 0 0 1px #b3344f;
+}
+
+.node-tag-pep {
+  color: #ff7a93;
 }
 
 /* ---------- Adverse media ---------- */

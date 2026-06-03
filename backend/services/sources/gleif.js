@@ -87,13 +87,24 @@ async function getChildren(rec, max = 8) {
 }
 
 // Assemble the ownership picture for one LEI: parents (with exception awareness) + children.
-// Each leg degrades independently so one failing call doesn't drop the whole graph.
+// Each leg degrades independently so one failing call doesn't drop the whole graph — but a
+// real failure (429/5xx/timeout, NOT a 404 "no parent") sets `partial` so the dossier marks
+// the section unavailable rather than asserting a false "no ownership".
 export async function getOwnership(lei) {
   const root = await getRecord(lei);
+  let partial = false;
+  const safe = async (fn, fallback) => {
+    try {
+      return await fn();
+    } catch {
+      partial = true;
+      return fallback;
+    }
+  };
   const [directParent, ultimateParent, children] = await Promise.all([
-    resolveParent(lei, "direct").catch(() => null),
-    resolveParent(lei, "ultimate").catch(() => null),
-    getChildren(root).catch(() => []),
+    safe(() => resolveParent(lei, "direct"), null),
+    safe(() => resolveParent(lei, "ultimate"), null),
+    safe(() => getChildren(root), []),
   ]);
-  return { root, directParent, ultimateParent, children };
+  return { root, directParent, ultimateParent, children, partial };
 }

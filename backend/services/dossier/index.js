@@ -86,7 +86,7 @@ async function upsertEntity(c) {
 }
 
 // Persist the normalized graph (entities + persons + edges) for provenance / caching.
-async function persistGraph(root, own, psc) {
+async function persistGraph(root, own, psc, pepByName = {}) {
   const ts = new Date();
   // Idempotent: clear this root's previously-persisted ownership (edges touching the
   // root, plus the PSC persons that hung off them) before reinserting, so repeated
@@ -130,7 +130,8 @@ async function persistGraph(root, own, psc) {
   }
   for (const p of psc || []) {
     if (p.isPerson === false) continue;
-    const person = await Person.create({ name: p.name, normalizedName: normalizeName(p.name), nationality: p.nationality || null, raw: p.raw || p });
+    const pep = pepByName[normalizeName(p.name)];
+    const person = await Person.create({ name: p.name, normalizedName: normalizeName(p.name), nationality: p.nationality || null, isPep: !!pep?.isPep, raw: p.raw || p });
     await Edge.create({ fromType: "entity", fromId: root.id, toType: "person", toId: person.id, relationship: "HAS_BENEFICIAL_OWNER", source: "companies_house", sourceRef: null, fetchedAt: ts });
   }
 }
@@ -204,6 +205,9 @@ export async function buildDossier(dossierId) {
     if (canonical.lei) {
       try {
         gleifOwnership = await gleif.getOwnership(canonical.lei);
+        // A partial GLEIF result (a leg failed with a real error, not a 404 no-parent)
+        // must be surfaced — otherwise a transient outage reads as "no ownership".
+        if (gleifOwnership.partial) issues.push("gleif-ownership");
         await rootEntity.update({
           directParentException: gleifOwnership.directParent?.exception?.reason || null,
           ultimateParentException: gleifOwnership.ultimateParent?.exception?.reason || null,
@@ -215,15 +219,9 @@ export async function buildDossier(dossierId) {
       try { psc = await ch.getPSC(canonical.companyNumber); } catch { issues.push("companies_house-psc"); }
     }
 
+    // Publish the graph from memory now; persistence (caching) happens later, after the
+    // PEP enrichment, so persons are written once with their final is_pep value.
     const ownership = buildOwnershipGraph({ canonical, gleifOwnership, psc });
-    // Persisting the graph is best-effort caching; a DB hiccup here must not discard
-    // the ownership we already assembled in memory and are about to publish.
-    try {
-      await persistGraph(rootEntity, gleifOwnership, psc);
-    } catch (e) {
-      console.warn("[dossier] persistGraph failed:", e.message);
-      issues.push("persist-graph");
-    }
 
     const ownershipSources = Array.from(new Set([
       ...matchedSources,
@@ -239,9 +237,10 @@ export async function buildDossier(dossierId) {
       result: { rootEntity: rootSummary(canonical), ownership, adverse: EMPTY_ADVERSE, litigation: EMPTY_LITIGATION, distress: EMPTY_DISTRESS, sources: ownershipSources },
     });
 
-    // ---- Slower external scans: adverse media + litigation + SEC distress, in parallel ----
+    // ---- Slower external scans: adverse media + litigation + SEC distress + PEP, parallel ----
     const adverseMod = await optional("../adverse/index.js");
-    const [adverse, litigation, distressRaw] = await Promise.all([
+    const wikidata = await optional("../sources/wikidata.js");
+    const [adverse, litigation, distressRaw, pepByName] = await Promise.all([
       adverseMod?.scanAdverse
         ? adverseMod.scanAdverse(canonical.name).catch((e) => { console.warn("[dossier] adverse failed:", e.message); issues.push("gdelt"); return EMPTY_ADVERSE; })
         : (issues.push("gdelt"), Promise.resolve(EMPTY_ADVERSE)),
@@ -251,8 +250,20 @@ export async function buildDossier(dossierId) {
       sec && canonical.cik
         ? sec.getDistressSignals(canonical.cik).catch((e) => { console.warn("[dossier] sec distress failed:", e.message); issues.push("sec-distress"); return { flags: [], filings: [] }; })
         : Promise.resolve({ flags: [], filings: [] }),
+      wikidata?.enrichPSC && psc.length
+        ? wikidata.enrichPSC(psc).catch((e) => { console.warn("[dossier] wikidata PEP failed:", e.message); issues.push("wikidata"); return {}; })
+        : Promise.resolve({}),
     ]);
     const distress = { ...distressRaw, cik: canonical.cik || null };
+
+    // Rebuild the graph with PEP flags now known, and persist it once (idempotent).
+    const ownershipFinal = buildOwnershipGraph({ canonical, gleifOwnership, psc, pepByName });
+    try {
+      await persistGraph(rootEntity, gleifOwnership, psc, pepByName);
+    } catch (e) {
+      console.warn("[dossier] persistGraph failed:", e.message);
+      issues.push("persist-graph");
+    }
 
     // A source that returned a typed "unavailable" (vs. a genuine empty result) must mark
     // the dossier partial — an empty list is not a clean bill of health if the call failed.
@@ -291,12 +302,13 @@ export async function buildDossier(dossierId) {
       ...((adverse.articles || []).length ? ["gdelt"] : []),
       ...((litigation.cases || []).length ? ["courtlistener"] : []),
       ...(canonical.cik ? ["sec"] : []),
+      ...(Object.keys(pepByName).length ? ["wikidata"] : []),
     ]));
 
     await dossier.update({
       status: issues.length ? "partial" : "ready",
       falseFlagEstimate: adverse.falseFlagEstimate || 0,
-      result: { rootEntity: rootSummary(canonical), ownership, adverse, litigation, distress, sources },
+      result: { rootEntity: rootSummary(canonical), ownership: ownershipFinal, adverse, litigation, distress, sources },
       completedAt: new Date(),
       error: issues.length ? `Some sources unavailable: ${issues.join(", ")}` : null,
     });

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeLayout, LAYOUT } from "./graphLayout.js";
+import { computeLayout, graphSignature, LAYOUT } from "./graphLayout.js";
 
 // root --(IS_CONSOLIDATED_BY)--> parent ; child --> root ; root --> person
 const nodes = [
@@ -51,4 +51,15 @@ test("empty graph doesn't throw", () => {
   const { positions, validEdges } = computeLayout([], []);
   assert.equal(positions.size, 0);
   assert.equal(validEdges.length, 0);
+});
+
+test("graphSignature is stable across identical content but changes when PEP flips", () => {
+  const a = [{ id: "root", isRoot: true }, { id: "person:0", type: "person", isPep: false }];
+  const b = [{ id: "root", isRoot: true }, { id: "person:0", type: "person", isPep: false }];
+  const withPep = [{ id: "root", isRoot: true }, { id: "person:0", type: "person", isPep: true }];
+  const e = [{ from: "root", to: "person:0" }];
+  // Same content (different array identity) -> same signature: no needless rebuild.
+  assert.equal(graphSignature(a, e), graphSignature(b, e));
+  // PEP flag flips on the SAME node id -> signature must change so the badge refreshes.
+  assert.notEqual(graphSignature(a, e), graphSignature(withPep, e));
 });

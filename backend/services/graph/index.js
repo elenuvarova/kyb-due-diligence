@@ -12,7 +12,7 @@ function pctFromNature(natures) {
   return null;
 }
 
-export function buildOwnershipGraph({ canonical, gleifOwnership, psc }) {
+export function buildOwnershipGraph({ canonical, gleifOwnership, psc, pepByName = {} }) {
   const nodes = new Map();
   const edges = [];
   const addNode = (n) => { if (!nodes.has(n.id)) nodes.set(n.id, n); };
@@ -82,13 +82,16 @@ export function buildOwnershipGraph({ canonical, gleifOwnership, psc }) {
         return;
       }
     }
+    const pep = isPerson ? pepByName[normalizeName(p.name)] : null;
     const id = isPerson ? `person:${i}` : `entity:psc:${i}`;
     addNode({
       id,
       type: isPerson ? "person" : "entity",
       label: p.name,
-      sublabel: [p.nationality, "beneficial owner (PSC)"].filter(Boolean).join(" · "),
+      sublabel: [p.nationality, pep?.isPep ? "PEP" : null, "beneficial owner (PSC)"].filter(Boolean).join(" · "),
       status: null, isRoot: false,
+      isPep: !!pep?.isPep,
+      pepPositions: pep?.positions || null,
     });
     idByName.set(normalizeName(p.name), id);
     edges.push({ from: rootId, to: id, relationship: "HAS_BENEFICIAL_OWNER", ownershipPct: pct });
