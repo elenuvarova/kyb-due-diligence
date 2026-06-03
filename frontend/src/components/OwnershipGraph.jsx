@@ -134,9 +134,6 @@ function NodeLabel({ node }) {
     <div className="node-inner">
       <div className="node-label">{node.label || "Unnamed"}</div>
       {node.sublabel && <div className="node-sublabel">{node.sublabel}</div>}
-      {node.type === "exception" && (
-        <div className="node-tag">Undisclosed ownership</div>
-      )}
       {node.isPep && (
         <div
           className="node-tag node-tag-pep"

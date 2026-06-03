@@ -4,6 +4,29 @@ import { normalizeName } from "../resolver/index.js";
 // Convention: an edge points FROM an entity TO the entity/person that owns/consolidates it.
 // So the graph reads bottom-up: children -> root -> (direct parent / ultimate parent / beneficial owners).
 
+// Human-readable labels for GLEIF reporting-exception reason/category codes. The raw code
+// is still kept in the node sublabel for provenance. NATURAL_PERSONS in particular is a
+// neutral, common case (owned by individuals, who have no LEI) — not a suspicious gap.
+const EXCEPTION_LABELS = {
+  NATURAL_PERSONS: "Owned by natural person(s)",
+  NON_CONSOLIDATING: "No consolidating parent",
+  NO_LEI: "Parent has no LEI",
+  NON_PUBLIC: "Parent not publicly disclosed",
+  NO_KNOWN_PERSON: "No known parent",
+  LEGAL_OBSTACLES: "Disclosure legally restricted",
+  BINDING_LEGAL_COMMITMENTS: "Disclosure legally restricted",
+  CONSENT_NOT_OBTAINED: "Disclosure consent not obtained",
+  DISCLOSURE_DETRIMENTAL: "Disclosure withheld (detrimental)",
+  DETRIMENT_NOT_EXCLUDED: "Disclosure withheld (detrimental)",
+};
+
+function exceptionLabel(code) {
+  if (!code) return "Owner not disclosed";
+  // `code` may be a comma/space-joined list of reasons; map the primary one.
+  const primary = String(code).split(/[,\s]+/).filter(Boolean)[0]?.toUpperCase();
+  return EXCEPTION_LABELS[primary] || "Owner not disclosed";
+}
+
 function pctFromNature(natures) {
   const s = (natures || []).join(" ");
   if (/75-to-100/.test(s)) return 87;
@@ -37,11 +60,12 @@ export function buildOwnershipGraph({ canonical, gleifOwnership, psc, pepByName 
         addNode({ id, type: "entity", label: p.entity.name, sublabel: `LEI ${p.entity.lei}`, status: p.entity.status, isRoot: false });
         edges.push({ from: rootId, to: id, relationship: rel, ownershipPct: null });
       } else if (p.exception) {
+        const code = p.exception.reason || p.exception.category || null;
         const id = `exception:${exceptionKey}`;
         addNode({
           id, type: "exception",
-          label: "Undisclosed owner",
-          sublabel: p.exception.reason || p.exception.category || "reporting exception",
+          label: exceptionLabel(code),
+          sublabel: [code, "GLEIF reporting exception"].filter(Boolean).join(" · "),
           status: null, isRoot: false,
         });
         edges.push({ from: rootId, to: id, relationship: rel, ownershipPct: null });
