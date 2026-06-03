@@ -75,7 +75,7 @@ export default function SearchView({ onCreateDossier }) {
         </p>
       </header>
 
-      <form className="search-form" onSubmit={runSearch}>
+      <form className="search-form" onSubmit={runSearch} data-tour="search">
         <input
           className="search-input"
           type="text"
@@ -107,8 +107,16 @@ export default function SearchView({ onCreateDossier }) {
         </p>
       )}
 
+      {searching && (
+        <div className="result-list" aria-hidden="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="skeleton skeleton-block" />
+          ))}
+        </div>
+      )}
+
       {results !== null && !searchError && (
-        <section className="results" aria-busy={creating}>
+        <section className="results animate-in" aria-busy={creating}>
           {results.length === 0 ? (
             <div className="card empty-state">
               <p className="muted">No matches found.</p>

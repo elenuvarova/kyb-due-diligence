@@ -5,6 +5,8 @@ import OwnershipGraph from "./OwnershipGraph.jsx";
 import AdverseMedia from "./AdverseMedia.jsx";
 import Litigation from "./Litigation.jsx";
 import Distress from "./Distress.jsx";
+import StateScreen from "./StateScreen.jsx";
+import { DossierSkeleton, PanelSkeleton } from "./Skeleton.jsx";
 
 const POLL_MS = 1500;
 const MAX_POLL_MS = 3 * 60 * 1000; // stop polling a stuck build after ~3 min
@@ -84,26 +86,30 @@ export default function DossierView({ dossierId, onBack }) {
     };
   }, [fetchDossier]);
 
-  // Initial load (before we have any dossier object yet).
+  // Initial load (before we have any dossier object yet) — skeleton of the real layout.
   if (loading && !dossier) {
     return (
       <DossierShell onBack={onBack}>
-        <div className="card building-state">
-          <Spinner />
-          <p className="muted">Loading dossier…</p>
-        </div>
+        <DossierSkeleton />
       </DossierShell>
     );
   }
 
   if (error && !dossier) {
+    const notFound = /\b404\b/.test(error);
     return (
       <DossierShell onBack={onBack}>
-        <div className="card">
-          <p className="error" role="alert">
-            Couldn't load this dossier: {error}
-          </p>
-        </div>
+        <StateScreen
+          tone="bad"
+          icon={notFound ? "?" : "!"}
+          title={notFound ? "Dossier not found" : "Couldn't load this dossier"}
+          body={notFound ? "It may have expired, or the link is wrong." : error}
+          actions={
+            <button className="btn btn-primary" type="button" onClick={onBack}>
+              New search
+            </button>
+          }
+        />
       </DossierShell>
     );
   }
@@ -119,7 +125,7 @@ export default function DossierView({ dossierId, onBack }) {
 
   return (
     <DossierShell onBack={onBack}>
-      <header className="dossier-head card">
+      <header className="dossier-head card animate-in">
         <div className="dossier-title-row">
           <h1 className="dossier-name">{displayName}</h1>
           <StatusBadge status={dossier.status} />
@@ -172,19 +178,19 @@ export default function DossierView({ dossierId, onBack }) {
       </header>
 
       <div className="panels">
-        <section className="panel card">
+        <section className="panel card animate-in">
           <h2 className="panel-title">Ownership structure</h2>
           {isBuilding && !hasOwnership(dossier) ? (
-            <PanelBuilding label="Resolving ownership…" />
+            <div className="skeleton skeleton-graph" aria-label="Resolving ownership…" />
           ) : (
             <OwnershipGraph ownership={dossier.ownership} />
           )}
         </section>
 
-        <section className="panel card">
+        <section className="panel card animate-in">
           <h2 className="panel-title">Adverse media</h2>
           {isBuilding && !hasAdverse(dossier) ? (
-            <PanelBuilding label="Scanning coverage…" />
+            <PanelSkeleton rows={3} />
           ) : (
             <AdverseMedia
               adverse={dossier.adverse}
@@ -194,14 +200,14 @@ export default function DossierView({ dossierId, onBack }) {
         </section>
 
         {hasLitigation(dossier) && (
-          <section className="panel card panel-full">
+          <section className="panel card panel-full animate-in">
             <h2 className="panel-title">Litigation &amp; bankruptcy (US)</h2>
             <Litigation litigation={dossier.litigation} />
           </section>
         )}
 
         {hasDistress(dossier) && (
-          <section className="panel card panel-full">
+          <section className="panel card panel-full animate-in">
             <h2 className="panel-title">Financial distress (SEC)</h2>
             <Distress distress={dossier.distress} />
           </section>
@@ -255,15 +261,6 @@ function DossierShell({ children, onBack }) {
       </button>
       {children}
     </main>
-  );
-}
-
-function PanelBuilding({ label }) {
-  return (
-    <div className="panel-building">
-      <Spinner small />
-      <p className="muted">{label}</p>
-    </div>
   );
 }
 
