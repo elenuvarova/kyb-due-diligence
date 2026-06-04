@@ -1,12 +1,9 @@
-databases:
-  - name: ai-workshop-db
-    plan: free
-    databaseName: app
-    user: app
-
+# Web service only. Render's free Postgres is not a durable free option, so bring your own
+# free hosted Postgres (e.g. Neon — free, no expiry) and set DATABASE_URL in the Render
+# dashboard. `sync: false` makes Render prompt for it on deploy and keep it secret.
 services:
   - type: web
-    name: ai-workshop-web
+    name: kyb-web
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile
@@ -17,6 +14,4 @@ services:
       - key: PORT
         value: 3001
       - key: DATABASE_URL
-        fromDatabase:
-          name: ai-workshop-db
-          property: connectionString
+        sync: false

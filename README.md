@@ -2,7 +2,7 @@
 
 Pull a company → **ownership structure (UBO)** + **adverse-media background**, with sources. A KYB ("Know Your Business") tool that helps answer *"Is this company who it claims to be, and is it risky to work with them?"* — focused on ownership transparency, adverse media, litigation, and financial distress. **Not** sanctions screening.
 
-Everything runs on **free, open data** and deploys free on Render. Built on a React + Vite frontend, an Express (ES modules) backend, and Sequelize (SQLite locally → PostgreSQL on Render).
+Everything runs on **free, open data** and deploys free (Render web service + a free hosted Postgres such as Neon). Built on a React + Vite frontend, an Express (ES modules) backend, and Sequelize (SQLite locally → PostgreSQL in production).
 
 > Full design rationale, the fact-checked data-source decisions, and the phased roadmap are in **[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)**.
 
@@ -77,13 +77,18 @@ Optionally, copy `.env.example` to `backend/.env` and add the free **Companies H
 
 > **⚠️ iCloud Drive note:** if this repo lives in an iCloud Drive folder, macOS "Optimize Mac Storage" may evict `node_modules` files to cloud-only state, which can make `node` hang on import. If the backend hangs on boot, either move the project out of iCloud, or run `rm -rf backend/node_modules && cd backend && npm install` to re-materialize local files. This never affects the Render deploy.
 
-## Deploy to Render
+## Deploy (Render web + free hosted Postgres)
 
-1. Push this repo to GitHub.
-2. In Render: **New → Blueprint**, connect the repo. `render.yaml` provisions a free web service + free Postgres; `DATABASE_URL` is wired automatically.
-3. To enable the optional sources in production, add their free keys as environment variables on the web service (`COMPANIES_HOUSE_API_KEY`, `SEC_USER_AGENT`, `COURTLISTENER_TOKEN`).
+Render no longer offers a durable free Postgres, so bring your own free database.
 
-**Free-tier notes:** the web service sleeps after inactivity (~30s cold start); Render's free Postgres expires after 30 days.
+1. **Create a free Postgres** at [Neon](https://neon.tech) (recommended — free, no expiry) or Supabase. Copy its connection string (`postgresql://…?sslmode=require`).
+2. Push this repo to GitHub (done).
+3. In Render: **New → Blueprint**, connect the repo. `render.yaml` provisions the free web service and prompts for `DATABASE_URL` — paste the Neon string.
+4. To enable the optional sources in production, add their free keys as environment variables on the web service (`COMPANIES_HOUSE_API_KEY`, `SEC_USER_AGENT`, `COURTLISTENER_TOKEN`). Without them, GLEIF + GDELT + Wikidata still work; the dossier is marked `partial`.
+
+The same `DATABASE_URL` works with any Postgres host — [db.js](backend/db.js) selects the dialect from it (SSL on).
+
+**Free-tier notes:** the Render web service sleeps after inactivity (~30–50s cold start); Neon's free compute auto-suspends when idle and wakes on the next query.
 
 ## API
 
