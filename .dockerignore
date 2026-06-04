@@ -4,6 +4,10 @@ build
 .env
 .env.local
 .env.*
+**/.env
+**/.env.*
+backend/.env
+**/*.sqlite
 .git
 *.log
 .DS_Store

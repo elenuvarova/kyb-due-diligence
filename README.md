@@ -2,7 +2,7 @@
 
 Pull a company → **ownership structure (UBO)** + **adverse-media background**, with sources. A KYB ("Know Your Business") tool that helps answer *"Is this company who it claims to be, and is it risky to work with them?"* — focused on ownership transparency, adverse media, litigation, and financial distress. **Not** sanctions screening.
 
-Everything runs on **free, open data** and deploys free (Render web service + a free hosted Postgres such as Neon). Built on a React + Vite frontend, an Express (ES modules) backend, and Sequelize (SQLite locally → PostgreSQL in production).
+Everything runs on **free, open data**. It deploys as a single container (Dockerfile build pack) on Coolify, backed by a Coolify-managed Postgres. Built on a React + Vite frontend, an Express (ES modules) backend, and Sequelize (SQLite locally → PostgreSQL in production).
 
 > Full design rationale, the fact-checked data-source decisions, and the phased roadmap are in **[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)**.
 
@@ -17,7 +17,7 @@ Everything runs on **free, open data** and deploys free (Render web service + a 
 ## Stack & data sources
 
 - **Frontend:** React 18 + Vite 5 (JavaScript), ownership graph via `reactflow`.
-- **Backend:** Node.js + Express, ES modules. All DB access through **Sequelize** — SQLite locally, PostgreSQL on Render (chosen automatically from `DATABASE_URL`).
+- **Backend:** Node.js + Express, ES modules. All DB access through **Sequelize** — SQLite locally, PostgreSQL in production (chosen automatically from `DATABASE_URL`).
 - **Free data sources** (verified June 2026):
 
 | Source | Role | Key needed? |
@@ -50,7 +50,7 @@ The app works with **zero keys** (GLEIF + GDELT). Companies House / SEC / CourtL
 │       ├── App.jsx            search ↔ dossier view switch
 │       └── components/        SearchView · DossierView · OwnershipGraph · AdverseMedia · Badges
 ├── docs/IMPLEMENTATION_PLAN.md
-├── Dockerfile · render.yaml · .env.example
+├── Dockerfile · .env.example
 ```
 
 ## Local development
@@ -75,20 +75,23 @@ Open `http://localhost:5173`. The Vite dev server proxies `/api` → the backend
 
 Optionally, copy `.env.example` to `backend/.env` and add the free **Companies House** key to enable UK beneficial-owner (PSC) data.
 
-> **⚠️ iCloud Drive note:** if this repo lives in an iCloud Drive folder, macOS "Optimize Mac Storage" may evict `node_modules` files to cloud-only state, which can make `node` hang on import. If the backend hangs on boot, either move the project out of iCloud, or run `rm -rf backend/node_modules && cd backend && npm install` to re-materialize local files. This never affects the Render deploy.
+> **⚠️ iCloud Drive note:** if this repo lives in an iCloud Drive folder, macOS "Optimize Mac Storage" may evict `node_modules` files to cloud-only state, which can make `node` hang on import. If the backend hangs on boot, either move the project out of iCloud, or run `rm -rf backend/node_modules && cd backend && npm install` to re-materialize local files. This never affects the deployed container.
 
-## Deploy (Render web + free hosted Postgres)
+## Deploy (Coolify, single container)
 
-Render no longer offers a durable free Postgres, so bring your own free database.
+The app ships as one Docker image built from the [Dockerfile](Dockerfile): a multi-stage build that compiles the Vite frontend, installs production-only backend deps, and runs `node server.js`, which serves both the `/api` routes and the built SPA on port **3001**. No nginx — Express is the edge (helmet, compression, static caching).
 
-1. **Create a free Postgres** at [Neon](https://neon.tech) (recommended — free, no expiry) or Supabase. Copy its connection string (`postgresql://…?sslmode=require`).
-2. Push this repo to GitHub (done).
-3. In Render: **New → Blueprint**, connect the repo. `render.yaml` provisions the free web service and prompts for `DATABASE_URL` — paste the Neon string.
-4. To enable the optional sources in production, add their free keys as environment variables on the web service (`COMPANIES_HOUSE_API_KEY`, `SEC_USER_AGENT`, `COURTLISTENER_TOKEN`). Without them, GLEIF + GDELT + Wikidata still work; the dossier is marked `partial`.
+1. Push this repo to GitHub.
+2. In Coolify: **New Resource → Docker / Dockerfile**, connect this repo. Build pack = Dockerfile; exposed port = **3001**.
+3. Provision a **Coolify-managed Postgres** (or bring your own) and copy its internal connection string (`postgres://postgres:PASSWORD@CONTAINER_NAME:5432/postgres` — no `?sslmode=require` for Coolify-internal Postgres).
+4. Set the environment variables in **Configuration → Environment Variables** (never in a file baked into the image):
+   - `NODE_ENV=production`
+   - `PORT=3001`
+   - `DATABASE_URL=…` (the Postgres string above)
+   - Optional source keys to light up extra data: `COMPANIES_HOUSE_API_KEY`, `SEC_USER_AGENT`, `COURTLISTENER_TOKEN`, `WIKIDATA_USER_AGENT`. Without them, GLEIF + GDELT still work; the dossier is marked `partial`.
+5. Add the subdomain (Cloudflare A record → Coolify host) and set it under **Configuration → General → Domains**, then **Redeploy**.
 
-The same `DATABASE_URL` works with any Postgres host — [db.js](backend/db.js) selects the dialect from it (SSL on).
-
-**Free-tier notes:** the Render web service sleeps after inactivity (~30–50s cold start); Neon's free compute auto-suspends when idle and wakes on the next query.
+Health is reported by the image's `HEALTHCHECK` (`wget` against `/api/health`, which pings the DB). The same `DATABASE_URL` works with any Postgres host — [db.js](backend/db.js) selects the dialect from it and only enables SSL when the string requests it (`sslmode=require` / `ssl=true`).
 
 ## API
 

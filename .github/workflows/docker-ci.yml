@@ -1,0 +1,97 @@
+name: docker-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # --- Backend: install + unit tests (node:test) ---
+      - name: Install backend deps
+        working-directory: backend
+        run: npm ci
+
+      - name: Run backend tests
+        working-directory: backend
+        run: npm test
+
+      # --- Frontend: install + build (verifies the Vite build is green) ---
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      # --- Build the real production image ---
+      - name: Build Docker image
+        run: docker build -t kyb-ci:latest .
+
+      # --- Regression guard: backend/.env must NOT be in the image ---
+      - name: Assert image contains no backend/.env
+        run: |
+          if docker run --rm kyb-ci:latest ls /app/backend/.env > /dev/null 2>&1; then
+            echo "ERROR: backend/.env was baked into the image"
+            exit 1
+          fi
+          echo "OK: no backend/.env in image"
+
+      # --- Boot the container and smoke-test the running app ---
+      - name: Run container
+        run: |
+          docker run -d --name kyb-ci -p 3001:3001 -e NODE_ENV=production -e PORT=3001 kyb-ci:latest
+
+      - name: Wait for container health
+        run: |
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' kyb-ci 2>/dev/null || echo "unknown")
+            echo "health: $status"
+            if [ "$status" = "healthy" ]; then
+              exit 0
+            fi
+            if [ "$status" = "unhealthy" ]; then
+              echo "container reported unhealthy"
+              docker logs kyb-ci
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "timed out waiting for health"
+          docker logs kyb-ci
+          exit 1
+
+      - name: Assert /api/health returns 200
+        run: |
+          curl -fsS http://127.0.0.1:3001/api/health
+          echo
+
+      - name: Assert SPA root serves the app shell
+        run: |
+          body=$(curl -fsS http://127.0.0.1:3001/)
+          echo "$body" | grep -q '<div id="root"' || {
+            echo "SPA root did not contain the app root element"
+            echo "$body"
+            exit 1
+          }
+          echo "OK: SPA root served"
+
+      - name: Dump container logs (always)
+        if: always()
+        run: docker logs kyb-ci || true
+
+      - name: Tear down
+        if: always()
+        run: docker rm -f kyb-ci || true

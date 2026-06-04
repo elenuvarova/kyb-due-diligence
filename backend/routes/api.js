@@ -1,8 +1,29 @@
 import express from "express";
+import rateLimit from "express-rate-limit";
 import { Dossier } from "../models/index.js";
 import { searchCompanies, buildDossier } from "../services/dossier/index.js";
 
 const router = express.Router();
+
+// Loose global limiter for all /api traffic — a backstop against runaway clients.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "too many requests" },
+});
+
+// Strict limiter for the expensive dossier build (fans out to several third-party APIs).
+const dossierLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "too many requests" },
+});
+
+router.use(apiLimiter);
 
 const EMPTY_RESULT = {
   rootEntity: null,
@@ -19,11 +40,12 @@ router.get("/companies/search", async (req, res) => {
   try {
     res.json({ results: await searchCompanies(q) });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("[api] companies/search failed:", e);
+    res.status(500).json({ error: "internal error" });
   }
 });
 
-router.post("/dossiers", async (req, res) => {
+router.post("/dossiers", dossierLimiter, async (req, res) => {
   const query = (req.body?.query || "").trim();
   if (!query) return res.status(400).json({ error: "query is required" });
   try {
@@ -32,7 +54,8 @@ router.post("/dossiers", async (req, res) => {
     buildDossier(dossier.id).catch((e) => console.error("[dossier] async build error:", e));
     res.status(201).json({ id: dossier.id, status: dossier.status });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("[api] dossier create failed:", e);
+    res.status(500).json({ error: "internal error" });
   }
 });
 
@@ -59,7 +82,8 @@ router.get("/dossiers/:id", async (req, res) => {
       ...result,
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("[api] dossier fetch failed:", e);
+    res.status(500).json({ error: "internal error" });
   }
 });
 
