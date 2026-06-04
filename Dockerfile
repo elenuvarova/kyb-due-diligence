@@ -10,7 +10,10 @@ RUN npm run build
 FROM node:20-alpine AS backend-deps
 WORKDIR /app/backend
 COPY backend/package*.json ./
-RUN npm ci --omit=dev
+# --omit=optional drops sqlite3 (a local-dev-only optionalDependency) and its
+# node-gyp/cacache/node-tar build chain, which npm audit flags. Prod uses Postgres
+# via the regular pg/sequelize deps, so the shipped image never needs sqlite3.
+RUN npm ci --omit=dev --omit=optional
 
 # Stage 3 — runtime
 FROM node:20-alpine AS runtime

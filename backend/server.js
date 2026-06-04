@@ -2,6 +2,7 @@ import express from "express";
 import helmet from "helmet";
 import compression from "compression";
 import path from "path";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { sequelize, dbKind } from "./db.js";
 import "./models/index.js";
@@ -17,6 +18,57 @@ const PORT = process.env.PORT || 3001;
 
 // Behind Coolify/Traefik: trust the first proxy so secure cookies / HSTS / client IP work.
 app.set("trust proxy", 1);
+
+// HTTP Basic Auth gate. Credentials come from env so the orchestrator can set them
+// without a code change. When either is empty/unset, auth is disabled (the app must
+// not hard-lock before the env vars are configured). /api/health is always exempt so
+// the container HEALTHCHECK keeps passing.
+const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER || "";
+const BASIC_AUTH_PASSWORD = process.env.BASIC_AUTH_PASSWORD || "";
+const basicAuthEnabled = Boolean(BASIC_AUTH_USER && BASIC_AUTH_PASSWORD);
+console.log(`basic auth: ${basicAuthEnabled ? "ENABLED" : "DISABLED"}`);
+
+// Constant-time string compare. timingSafeEqual requires equal-length buffers, so we
+// hash both sides to a fixed length first; this also avoids leaking length via timing.
+function safeEqual(a, b) {
+  const ah = crypto.createHash("sha256").update(String(a)).digest();
+  const bh = crypto.createHash("sha256").update(String(b)).digest();
+  return crypto.timingSafeEqual(ah, bh);
+}
+
+function requireBasicAuth(req, res, next) {
+  // Always let the health check through, even when auth is enabled.
+  if (req.path === "/api/health") return next();
+  // Auth disabled until the orchestrator sets both env vars.
+  if (!basicAuthEnabled) return next();
+
+  const header = req.headers.authorization || "";
+  // Expect "Basic <base64(user:pass)>"; password may itself contain ':'.
+  const [scheme, encoded] = header.split(" ");
+  if (scheme === "Basic" && encoded) {
+    let decoded = "";
+    try {
+      decoded = Buffer.from(encoded, "base64").toString("utf8");
+    } catch {
+      decoded = "";
+    }
+    const sep = decoded.indexOf(":");
+    if (sep !== -1) {
+      const user = decoded.slice(0, sep);
+      const pass = decoded.slice(sep + 1);
+      // Evaluate both comparisons so a wrong username and wrong password cost the same.
+      const userOk = safeEqual(user, BASIC_AUTH_USER);
+      const passOk = safeEqual(pass, BASIC_AUTH_PASSWORD);
+      if (userOk && passOk) return next();
+    }
+  }
+
+  res.set("WWW-Authenticate", 'Basic realm="Restricted"');
+  return res.status(401).send("Authentication required.");
+}
+
+// Mounted first so it protects the SPA and every /api/* route except /api/health.
+app.use(requireBasicAuth);
 
 app.use(
   helmet({
