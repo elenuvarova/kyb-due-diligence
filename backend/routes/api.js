@@ -37,6 +37,7 @@ const EMPTY_RESULT = {
 router.get("/companies/search", async (req, res) => {
   const q = (req.query.q || "").trim();
   if (!q) return res.json({ results: [] });
+  if (q.length > 200) return res.status(400).json({ error: "query too long" });
   try {
     res.json({ results: await searchCompanies(q) });
   } catch (e) {
@@ -48,6 +49,7 @@ router.get("/companies/search", async (req, res) => {
 router.post("/dossiers", dossierLimiter, async (req, res) => {
   const query = (req.body?.query || "").trim();
   if (!query) return res.status(400).json({ error: "query is required" });
+  if (query.length > 200) return res.status(400).json({ error: "query too long" });
   try {
     const dossier = await Dossier.create({ query, status: "building" });
     // Build in the background; the client polls GET /api/dossiers/:id.

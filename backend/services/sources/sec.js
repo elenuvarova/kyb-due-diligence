@@ -24,12 +24,12 @@ function padCik(cik) {
   return String(cik).replace(/\D/g, "").padStart(10, "0");
 }
 
-let tickersCache = null;
+let tickersPromise = null;
 async function loadTickers() {
-  if (tickersCache) return tickersCache;
-  const raw = await get(TICKERS_URL);
-  tickersCache = Object.values(raw || {});
-  return tickersCache;
+  if (!tickersPromise) {
+    tickersPromise = get(TICKERS_URL).then(raw => Object.values(raw || {}));
+  }
+  return tickersPromise;
 }
 
 export async function search(name) {

@@ -20,7 +20,7 @@ const cleanName = (name) => String(name || "").replace(HONORIFICS, "").trim();
 // Build a safe SPARQL string literal: collapse control whitespace (a raw newline/CR/tab is
 // illegal inside "..."@en and would 400 the query), then escape backslash and quote.
 const escapeLiteral = (s) =>
-  String(s).replace(/[\r\n\t]+/g, " ").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  String(s).replace(/[\r\n\t]+/g, " ").replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/'/g, "\\'");
 
 // Conservative PEP check: is there an EXACT-name human in Wikidata whose occupation is
 // "politician" (Q82955)? Exact-label matching keeps false positives near zero — a false

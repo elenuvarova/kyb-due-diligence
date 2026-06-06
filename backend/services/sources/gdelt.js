@@ -102,7 +102,7 @@ export async function fetchArtList(companyName) {
 // to show a snippet. Note: it rejects the sourcelang operator, so query is bare.
 export async function fetchContext(companyName) {
   const q = encodeURIComponent(`"${companyName}"`);
-  const url = `${CONTEXT_BASE}?query=${q}&format=json&maxrecords=75`;
+  const url = `${CONTEXT_BASE}?query=${q}&format=json&maxrecords=75&timespan=${TIMESPAN}`;
   let data;
   try {
     data = await gdeltFetch(url);

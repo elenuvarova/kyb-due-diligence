@@ -17,7 +17,7 @@ if (isPostgres) {
     logging: false,
     ...(requireSsl && {
       dialectOptions: {
-        ssl: { require: true, rejectUnauthorized: false },
+        ssl: { require: true, rejectUnauthorized: true },
       },
     }),
   });

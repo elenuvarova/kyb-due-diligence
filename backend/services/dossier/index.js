@@ -128,7 +128,7 @@ async function persistGraph(root, own, psc, pepByName = {}) {
       if (ce) await Edge.create({ fromType: "entity", fromId: ce.id, toType: "entity", toId: root.id, relationship: c.relationship || "IS_DIRECTLY_CONSOLIDATED_BY", source: "gleif", sourceRef: ce.lei, fetchedAt: ts });
     }
   }
-  for (const p of psc || []) {
+  for (const p of (psc || []).filter(p => !p.ceased)) {
     if (p.isPerson === false) continue;
     const pep = pepByName[normalizeName(p.name)];
     const person = await Person.create({ name: p.name, normalizedName: normalizeName(p.name), nationality: p.nationality || null, isPep: !!pep?.isPep, raw: p.raw || p });
@@ -281,12 +281,12 @@ export async function buildDossier(dossierId) {
     } catch (e) { console.warn("[dossier] persistGraph failed:", e.message); issues.push("persist-graph"); }
     try {
       await Litigation.destroy({ where: { entityId: rootEntity.id } });
-      for (const c of litigation.cases || []) {
-        await Litigation.create({
+      if ((litigation.cases || []).length) {
+        await Litigation.bulkCreate(litigation.cases.map(c => ({
           entityId: rootEntity.id, caseName: c.caseName, court: c.court,
           dateFiled: c.dateFiled, docketNumber: c.docketNumber, suitNature: c.suitNature,
           chapter: c.chapter, isBankruptcy: c.isBankruptcy, url: c.url,
-        });
+        })));
       }
     } catch (e) { console.warn("[dossier] persist litigation failed:", e.message); issues.push("persist"); }
 
@@ -301,15 +301,15 @@ export async function buildDossier(dossierId) {
 
     try {
       await AdverseArticle.destroy({ where: { entityId: rootEntity.id } });
-      for (const a of adverse.articles || []) {
-        if (!a.url) continue; // url is required (allowNull:false) and is the article's identity
-        await AdverseArticle.create({
+      const validArticles = (adverse.articles || []).filter(a => a.url);
+      if (validArticles.length) {
+        await AdverseArticle.bulkCreate(validArticles.map(a => ({
           entityId: rootEntity.id, url: a.url, title: a.title, domain: a.domain,
           language: a.language, sourceCountry: a.sourceCountry,
           seenDate: a.seenDate ? new Date(a.seenDate) : null, tone: a.tone,
           riskCategory: a.riskCategory, isAdverse: !!a.isAdverse,
           relevanceScore: a.relevanceScore, snippet: a.snippet,
-        });
+        })));
       }
     } catch (e) { console.warn("[dossier] persist adverse failed:", e.message); issues.push("persist"); }
 
@@ -326,9 +326,9 @@ export async function buildDossier(dossierId) {
     // discarding it; only a failure before that first publish is a hard "error".
     const fresh = await Dossier.findByPk(dossierId).catch(() => null);
     const hadResult = (fresh?.result?.ownership?.nodes?.length ?? 0) > 0;
-    await dossier.update({
+    await (fresh || dossier).update({
       status: hadResult ? "partial" : "error",
-      error: err.message,
+      error: "Build failed due to an internal error.",
       completedAt: new Date(),
     });
   }

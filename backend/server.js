@@ -90,7 +90,7 @@ app.use(
   })
 );
 app.use(compression());
-app.use(express.json());
+app.use(express.json({ limit: "16kb" }));
 
 app.get("/api/health", async (req, res) => {
   try {
@@ -130,7 +130,8 @@ async function start() {
     await sequelize.authenticate();
     await sequelize.sync();
   } catch (err) {
-    console.error("Database init failed:", err.message);
+    console.error("Database init failed — exiting:", err.message);
+    process.exit(1);
   }
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

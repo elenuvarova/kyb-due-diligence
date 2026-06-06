@@ -704,7 +704,7 @@ h1 {
    ========================================================================= */
 .graph-wrap {
   position: relative;
-  height: 460px;
+  height: clamp(340px, 48vh, 500px);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
@@ -902,6 +902,7 @@ h1 {
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .article-title {
@@ -1025,7 +1026,7 @@ a.article-title:hover {
 }
 
 .skeleton-graph {
-  height: 460px;
+  height: clamp(340px, 48vh, 500px);
   border-radius: var(--radius-sm);
 }
 
@@ -1222,7 +1223,7 @@ a.article-title:hover {
   }
   .graph-wrap,
   .skeleton-graph {
-    height: 380px;
+    height: clamp(300px, 45vh, 420px);
   }
 }
 
@@ -1241,17 +1242,28 @@ a.article-title:hover {
   }
   .search-form .btn-primary {
     width: 100%;
+    min-height: 48px;
   }
   .app-bar {
     padding: var(--space-2) var(--space-3);
   }
+  .brand span:not(.brand-mark) {
+    display: none;
+  }
   .graph-wrap,
   .skeleton-graph {
-    height: 340px;
+    height: clamp(280px, 45vh, 360px);
   }
   .graph-legend {
     font-size: 0.65rem;
     padding: var(--space-1) var(--space-2);
+  }
+  .article-head {
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .dossier-title-row {
+    gap: var(--space-2);
   }
 }
 
